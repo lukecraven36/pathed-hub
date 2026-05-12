@@ -631,23 +631,178 @@ document.getElementById('btn-connect-fa').addEventListener('click', () => {
   setTimeout(() => window.open(url, '_blank'), 800);
 });
 
-document.getElementById('btn-connect-ms').addEventListener('click', () => {
+// ─── MICROSOFT 365 OAUTH (PKCE) ───────────────
+// Generates a code verifier + challenge, redirects to Microsoft login,
+// catches the auth code on return, exchanges it for an access token.
+
+async function generatePkceChallenge() {
+  // Generate a random 43–128 char verifier
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  const verifier = base64UrlEncode(array);
+  // Hash it with SHA-256 to make the challenge
+  const encoded = new TextEncoder().encode(verifier);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+  const challenge = base64UrlEncode(new Uint8Array(hashBuffer));
+  return { verifier, challenge };
+}
+
+function base64UrlEncode(bytes) {
+  let str = '';
+  bytes.forEach(b => str += String.fromCharCode(b));
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+const MS_REDIRECT_URI = window.location.origin + window.location.pathname;
+const MS_SCOPES = 'Calendars.ReadWrite offline_access User.Read';
+
+document.getElementById('btn-connect-ms').addEventListener('click', async () => {
   const clientId = document.getElementById('ms-client-id').value.trim();
   const tenantId = document.getElementById('ms-tenant-id').value.trim();
-  if (!clientId || !tenantId) { toast('Enter your Azure Client ID and Tenant ID first', 'error'); return; }
-  const redirect  = encodeURIComponent(window.location.origin + window.location.pathname);
-  const scope     = encodeURIComponent('Calendars.ReadWrite offline_access');
-  const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirect}&scope=${scope}`;
+  if (!clientId || !tenantId) {
+    toast('Enter your Azure Client ID and Tenant ID first', 'error');
+    return;
+  }
+
+  // Persist IDs so we can find them after the redirect
+  state.settings.msClientId = clientId;
+  state.settings.msTenantId = tenantId;
+  save('settings');
+
+  const { verifier, challenge } = await generatePkceChallenge();
+  // Stash the verifier — we'll need it when the redirect returns
+  sessionStorage.setItem('ph_ms_verifier', verifier);
+
+  const params = new URLSearchParams({
+    client_id:             clientId,
+    response_type:         'code',
+    redirect_uri:          MS_REDIRECT_URI,
+    response_mode:         'query',
+    scope:                 MS_SCOPES,
+    code_challenge:        challenge,
+    code_challenge_method: 'S256',
+    state:                 'ms_oauth',
+  });
+
+  const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?${params}`;
   toast('Redirecting to Microsoft to authorise…', 'info');
-  setTimeout(() => window.open(url, '_blank'), 800);
+  setTimeout(() => { window.location.href = url; }, 600);
 });
+
+// ─── HANDLE OAUTH CALLBACK ────────────────────
+// Runs on every page load. If the URL has ?code=... we just came back
+// from Microsoft and need to exchange the code for an access token.
+async function handleOAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  const stateP = params.get('state');
+  const error  = params.get('error');
+
+  if (error) {
+    const desc = params.get('error_description') || error;
+    toast('Microsoft sign-in failed: ' + decodeURIComponent(desc), 'error');
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return;
+  }
+
+  if (!code) return;
+
+  if (stateP === 'ms_oauth') {
+    await exchangeMsAuthCode(code);
+  }
+
+  // Clean the URL so a refresh doesn't re-trigger the exchange
+  window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+async function exchangeMsAuthCode(code) {
+  const s = state.settings;
+  const verifier = sessionStorage.getItem('ph_ms_verifier');
+  if (!s.msClientId || !s.msTenantId || !verifier) {
+    toast('Microsoft auth state lost. Try Connect Microsoft 365 again.', 'error');
+    return;
+  }
+
+  const body = new URLSearchParams({
+    client_id:     s.msClientId,
+    grant_type:    'authorization_code',
+    code:          code,
+    redirect_uri:  MS_REDIRECT_URI,
+    code_verifier: verifier,
+    scope:         MS_SCOPES,
+  });
+
+  try {
+    const res = await fetch(`https://login.microsoftonline.com/${s.msTenantId}/oauth2/v2.0/token`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    body.toString(),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.error('[MS Token] Error:', data);
+      toast('Microsoft token exchange failed: ' + (data.error_description || data.error || 'unknown'), 'error');
+      return;
+    }
+    state.settings.msAccessToken  = data.access_token;
+    state.settings.msRefreshToken = data.refresh_token;
+    state.settings.msTokenExpiry  = Date.now() + (data.expires_in * 1000);
+    save('settings');
+    sessionStorage.removeItem('ph_ms_verifier');
+    updateBadges();
+    toast('Microsoft 365 connected successfully', 'success');
+  } catch (err) {
+    console.error('[MS Token] Network error:', err);
+    toast('Network error connecting Microsoft 365', 'error');
+  }
+}
+
+// Refresh the access token if it's near expiry
+async function getMsAccessToken() {
+  const s = state.settings;
+  if (!s.msAccessToken) return null;
+  // If token has at least 2 minutes left, use it
+  if (s.msTokenExpiry && s.msTokenExpiry - Date.now() > 120000) {
+    return s.msAccessToken;
+  }
+  if (!s.msRefreshToken) return null;
+
+  const body = new URLSearchParams({
+    client_id:     s.msClientId,
+    grant_type:    'refresh_token',
+    refresh_token: s.msRefreshToken,
+    scope:         MS_SCOPES,
+  });
+
+  try {
+    const res = await fetch(`https://login.microsoftonline.com/${s.msTenantId}/oauth2/v2.0/token`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    body.toString(),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.warn('[MS Refresh] Failed:', data);
+      return null;
+    }
+    state.settings.msAccessToken  = data.access_token;
+    state.settings.msRefreshToken = data.refresh_token || s.msRefreshToken;
+    state.settings.msTokenExpiry  = Date.now() + (data.expires_in * 1000);
+    save('settings');
+    return data.access_token;
+  } catch (err) {
+    console.error('[MS Refresh] Network error:', err);
+    return null;
+  }
+}
 
 function updateBadges() {
   const s = state.settings;
   const faBadge = document.getElementById('fa-badge');
   const msBadge = document.getElementById('ms-badge');
   faBadge.classList.toggle('connected', !!(s.faClientId && s.faClientSecret));
-  msBadge.classList.toggle('connected', !!(s.msClientId && s.msTenantId));
+  // MS is truly connected only when we have an access token
+  msBadge.classList.toggle('connected', !!s.msAccessToken);
 }
 
 // ─── FREEAGENT SYNC (STUB → REAL) ─────────────
@@ -681,17 +836,69 @@ async function syncFreeAgentInvoice(inv, client) {
   console.info('[FreeAgent] Would create invoice for:', inv.ref, inv.clientName);
 }
 
-// ─── OUTLOOK SYNC (STUB → REAL) ───────────────
+// ─── OUTLOOK SYNC (REAL) ──────────────────────
 async function syncOutlookCalendar(work) {
-  const s = state.settings;
-  if (!s.msClientId) {
-    console.info('[Outlook] Not configured — skipping calendar sync');
+  const token = await getMsAccessToken();
+  if (!token) {
+    console.info('[Outlook] Not connected — skipping calendar sync');
     return;
   }
+
   const client = state.clients.find(c => c.id === work.clientId);
-  // POST https://graph.microsoft.com/v1.0/me/events
-  // Body: { subject, start: { dateTime, timeZone }, end: { dateTime, timeZone }, body: { content } }
-  console.info('[Outlook] Would create calendar event:', work.workType, 'for', client?.companyName);
+  const clientName = client ? client.companyName : 'Client';
+
+  // Build start/end times. Default: 09:00 start.
+  // Full Day = 8 hours, Half Day = 4 hours.
+  const hours = work.duration === 'Half Day' ? 4 : 8;
+  const startISO = `${work.date}T09:00:00`;
+  const end = new Date(`${work.date}T09:00:00`);
+  end.setHours(end.getHours() + hours);
+  const endISO = end.toISOString().slice(0, 19);
+
+  // Best guess at user timezone
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London';
+
+  const event = {
+    subject: `${clientName} — ${work.workType}`,
+    body: {
+      contentType: 'HTML',
+      content: `
+        <p><strong>Client:</strong> ${clientName}</p>
+        <p><strong>Work:</strong> ${work.workType}</p>
+        <p><strong>Duration:</strong> ${work.duration}</p>
+        <p><strong>Rate:</strong> £${work.confirmedRate}</p>
+        ${work.notes ? `<p><strong>Notes:</strong> ${work.notes}</p>` : ''}
+        <hr><p><em>Logged via Pathed Hub</em></p>
+      `.trim(),
+    },
+    start:    { dateTime: startISO, timeZone: tz },
+    end:      { dateTime: endISO,   timeZone: tz },
+    location: { displayName: work.location || '' },
+    showAs:   'busy',
+  };
+
+  try {
+    const res = await fetch('https://graph.microsoft.com/v1.0/me/events', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify(event),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('[Outlook] Event creation failed:', err);
+      toast('Could not create Outlook event', 'error');
+      return;
+    }
+    const created = await res.json();
+    console.info('[Outlook] Event created:', created.id);
+    toast('Added to your Outlook calendar', 'success');
+  } catch (err) {
+    console.error('[Outlook] Network error:', err);
+    toast('Network error creating Outlook event', 'error');
+  }
 }
 
 // ─── HELPERS ──────────────────────────────────
@@ -717,3 +924,4 @@ function statusLabel(s) {
 // ─── INIT ─────────────────────────────────────
 renderDashboard();
 updateBadges();
+handleOAuthCallback();
