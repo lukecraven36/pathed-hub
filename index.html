@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pathed Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">
+      <span class="dot dot-cyan"></span>
+      <span class="logo-text">Pathed</span>
+      <span class="dot dot-teal"></span>
+    </div>
+    <span class="logo-sub">C O N S U L T I N G</span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <button class="nav-item active" data-view="dashboard">
+      <span class="nav-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      </span>
+      <span>Dashboard</span>
+    </button>
+    <button class="nav-item" data-view="clients">
+      <span class="nav-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </span>
+      <span>Clients</span>
+    </button>
+    <button class="nav-item" data-view="work">
+      <span class="nav-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+      </span>
+      <span>Consultancy Work</span>
+    </button>
+    <button class="nav-item" data-view="pipeline">
+      <span class="nav-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      </span>
+      <span>Pipeline</span>
+    </button>
+    <button class="nav-item" data-view="invoices">
+      <span class="nav-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      </span>
+      <span>Invoices</span>
+    </button>
+    <button class="nav-item" data-view="settings">
+      <span class="nav-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
+      </span>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="integration-badges">
+      <span class="badge" id="fa-badge" title="FreeAgent">FA</span>
+      <span class="badge" id="ms-badge" title="Microsoft 365">MS</span>
+    </div>
+    <span class="sidebar-footer-label">Pathed Hub v1.0</span>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<main class="main" id="main">
+
+  <!-- DASHBOARD VIEW -->
+  <section class="view active" id="view-dashboard">
+    <header class="view-header">
+      <div>
+        <p class="eyebrow">Overview</p>
+        <h1>Dashboard</h1>
+      </div>
+    </header>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon cyan">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        </div>
+        <div>
+          <p class="stat-label">Active Clients</p>
+          <p class="stat-value" id="stat-clients">0</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon purple">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+        </div>
+        <div>
+          <p class="stat-label">Days Logged</p>
+          <p class="stat-value" id="stat-days">0</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon teal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <div>
+          <p class="stat-label">Pipeline Value</p>
+          <p class="stat-value" id="stat-pipeline">£0</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon pink">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div>
+          <p class="stat-label">Pending Invoices</p>
+          <p class="stat-value" id="stat-invoices">0</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="card">
+        <h3 class="card-title">Recent Work</h3>
+        <div id="recent-work-list" class="empty-state">No consultancy days logged yet.</div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Upcoming Calendar</h3>
+        <div id="upcoming-calendar-list" class="empty-state">No upcoming work scheduled.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CLIENTS VIEW -->
+  <section class="view" id="view-clients">
+    <header class="view-header">
+      <div>
+        <p class="eyebrow">Directory</p>
+        <h1>Clients</h1>
+      </div>
+      <button class="btn-primary" id="btn-new-client">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Client
+      </button>
+    </header>
+    <div id="clients-list" class="cards-grid"></div>
+    <div id="clients-empty" class="empty-state-full">
+      <div class="stat-icon cyan" style="margin: 0 auto 16px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+      </div>
+      <p>No clients yet. Add your first client to get started.</p>
+    </div>
+  </section>
+
+  <!-- WORK VIEW -->
+  <section class="view" id="view-work">
+    <header class="view-header">
+      <div>
+        <p class="eyebrow">Log</p>
+        <h1>Consultancy Work</h1>
+      </div>
+      <button class="btn-primary" id="btn-new-work">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Log Work
+      </button>
+    </header>
+    <div class="table-wrap">
+      <table class="data-table" id="work-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Client</th>
+            <th>Type</th>
+            <th>Duration</th>
+            <th>Rate</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="work-tbody"></tbody>
+      </table>
+      <div id="work-empty" class="empty-state-full">
+        <div class="stat-icon purple" style="margin: 0 auto 16px;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+        </div>
+        <p>No consultancy work logged yet.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- PIPELINE VIEW -->
+  <section class="view" id="view-pipeline">
+    <header class="view-header">
+      <div>
+        <p class="eyebrow">Revenue</p>
+        <h1>Pipeline</h1>
+      </div>
+    </header>
+    <div class="pipeline-cols">
+      <div class="pipeline-col">
+        <div class="pipeline-col-header planned">
+          <span>Planned</span>
+          <span class="pipeline-count" id="count-planned">0</span>
+        </div>
+        <div class="pipeline-cards" id="pipeline-planned"></div>
+      </div>
+      <div class="pipeline-col">
+        <div class="pipeline-col-header confirmed">
+          <span>Confirmed</span>
+          <span class="pipeline-count" id="count-confirmed">0</span>
+        </div>
+        <div class="pipeline-cards" id="pipeline-confirmed"></div>
+      </div>
+      <div class="pipeline-col">
+        <div class="pipeline-col-header invoiced">
+          <span>Ready to Invoice</span>
+          <span class="pipeline-count" id="count-invoiced">0</span>
+        </div>
+        <div class="pipeline-cards" id="pipeline-ready"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INVOICES VIEW -->
+  <section class="view" id="view-invoices">
+    <header class="view-header">
+      <div>
+        <p class="eyebrow">Billing</p>
+        <h1>Invoices</h1>
+      </div>
+    </header>
+    <div id="invoices-list" class="cards-grid"></div>
+    <div id="invoices-empty" class="empty-state-full">
+      <div class="stat-icon teal" style="margin: 0 auto 16px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <p>No invoices created yet. Mark work as "Ready to Invoice" in the Pipeline view.</p>
+    </div>
+  </section>
+
+  <!-- SETTINGS VIEW -->
+  <section class="view" id="view-settings">
+    <header class="view-header">
+      <div>
+        <p class="eyebrow">Configuration</p>
+        <h1>Settings</h1>
+      </div>
+      <button class="btn-primary" id="btn-save-settings">Save Settings</button>
+    </header>
+    <div class="settings-grid">
+      <div class="card">
+        <div class="card-section-header">
+          <div class="stat-icon cyan" style="width:40px;height:40px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+          </div>
+          <div>
+            <h3>FreeAgent API</h3>
+            <p class="muted">Connect to your FreeAgent account for contacts and invoicing.</p>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="fa-client-id">Client ID</label>
+          <input type="text" id="fa-client-id" placeholder="Your FreeAgent OAuth Client ID" />
+        </div>
+        <div class="form-group">
+          <label for="fa-client-secret">Client Secret</label>
+          <input type="password" id="fa-client-secret" placeholder="Your FreeAgent OAuth Client Secret" />
+        </div>
+        <div class="form-group">
+          <label for="fa-sandbox">Environment</label>
+          <select id="fa-sandbox">
+            <option value="sandbox">Sandbox (Testing)</option>
+            <option value="production">Production (Live)</option>
+          </select>
+        </div>
+        <button class="btn-secondary" id="btn-connect-fa">Connect FreeAgent</button>
+        <p class="settings-help">Register your app at <a href="https://dev.freeagent.com" target="_blank">dev.freeagent.com</a> to get your credentials.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-section-header">
+          <div class="stat-icon purple" style="width:40px;height:40px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </div>
+          <div>
+            <h3>Microsoft 365 / Outlook</h3>
+            <p class="muted">Connect to your Microsoft 365 Business account for calendar entries.</p>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="ms-client-id">Azure App Client ID</label>
+          <input type="text" id="ms-client-id" placeholder="Your Azure AD Application Client ID" />
+        </div>
+        <div class="form-group">
+          <label for="ms-tenant-id">Tenant ID</label>
+          <input type="text" id="ms-tenant-id" placeholder="Your Microsoft 365 Tenant ID" />
+        </div>
+        <button class="btn-secondary" id="btn-connect-ms">Connect Microsoft 365</button>
+        <p class="settings-help">Register your app at <a href="https://portal.azure.com" target="_blank">portal.azure.com</a> under Azure Active Directory → App registrations.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-section-header">
+          <div class="stat-icon teal" style="width:40px;height:40px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <div>
+            <h3>Business Details</h3>
+            <p class="muted">Used on invoices and in FreeAgent.</p>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="biz-name">Business Name</label>
+          <input type="text" id="biz-name" value="Pathed Consulting" />
+        </div>
+        <div class="form-group">
+          <label for="biz-email">Email</label>
+          <input type="email" id="biz-email" value="hello@pathed.co.uk" />
+        </div>
+        <div class="form-group">
+          <label for="biz-vat">VAT Number (if registered)</label>
+          <input type="text" id="biz-vat" placeholder="GB123456789" />
+        </div>
+        <div class="form-group">
+          <label for="biz-rate">Default Daily Rate (£)</label>
+          <input type="number" id="biz-rate" placeholder="e.g. 850" />
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- MODAL OVERLAY -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">Modal</h2>
+      <button class="modal-close" id="modal-close">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
