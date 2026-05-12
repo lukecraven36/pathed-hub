@@ -1,0 +1,8 @@
+# Netlify configuration for Pathed Hub
+# -------------------------------------
+# This file tells Netlify where to find Functions and how to handle the build.
+# Static site with no build step + functions in /netlify/functions.
+
+[build]
+  publish    = "."
+  functions  = "netlify/functions"
