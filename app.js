@@ -64,8 +64,32 @@ function openModal(title, bodyHTML, onConfirm, confirmLabel = 'Save') {
   document.getElementById('modal-overlay').classList.add('open');
   document.getElementById('modal-cancel').onclick = closeModal;
   document.getElementById('modal-close').onclick  = closeModal;
-  document.getElementById('modal-confirm').onclick = () => {
-    if (onConfirm()) closeModal();
+
+  const confirmBtn = document.getElementById('modal-confirm');
+  const originalLabel = confirmBtn.textContent;
+  confirmBtn.onclick = async () => {
+    if (confirmBtn.disabled) return;
+    confirmBtn.disabled = true;
+    confirmBtn.classList.add('btn-saving');
+    confirmBtn.textContent = 'Saving…';
+    try {
+      const result = await Promise.resolve(onConfirm());
+      if (result) {
+        confirmBtn.textContent = 'Saved ✓';
+        // Brief pause so the user actually sees the success state
+        setTimeout(closeModal, 350);
+      } else {
+        // Validation failed — restore button so user can try again
+        confirmBtn.disabled = false;
+        confirmBtn.classList.remove('btn-saving');
+        confirmBtn.textContent = originalLabel;
+      }
+    } catch (err) {
+      console.error('[Modal Save] Error:', err);
+      confirmBtn.disabled = false;
+      confirmBtn.classList.remove('btn-saving');
+      confirmBtn.textContent = originalLabel;
+    }
   };
 
   // If a SoW editor div is present, boot Quill on it
@@ -1257,6 +1281,23 @@ async function generateSowPdf(workId) {
 }
 window.generateSowPdf = generateSowPdf;
 
+// Cache for embedded font bytes — fetch once per session
+const _fontBytesCache = {};
+
+async function loadFontBytes(url) {
+  if (_fontBytesCache[url]) return _fontBytesCache[url];
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const bytes = await res.arrayBuffer();
+    _fontBytesCache[url] = bytes;
+    return bytes;
+  } catch (err) {
+    console.warn('[Fonts] Failed to load', url, err);
+    return null;
+  }
+}
+
 async function renderSowPdf(work, client, sowHtml) {
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
   const doc = await PDFDocument.create();
@@ -1264,9 +1305,55 @@ async function renderSowPdf(work, client, sowHtml) {
   doc.setAuthor(state.settings.bizName || 'Pathed Consulting');
   doc.setCreator('Pathed Hub');
 
-  const helv      = await doc.embedFont(StandardFonts.Helvetica);
-  const helvBold  = await doc.embedFont(StandardFonts.HelveticaBold);
-  const helvOb    = await doc.embedFont(StandardFonts.HelveticaOblique);
+  // Try to embed real Pathed brand fonts. Fall back to Helvetica if fonts
+  // can't be loaded (offline, CDN blocked, etc) so the PDF still works.
+  let bodyFont, bodyBoldFont, bodyItalicFont, displayFont;
+  const fontkitAvailable = (typeof fontkit !== 'undefined');
+  if (fontkitAvailable) {
+    doc.registerFontkit(fontkit);
+  }
+
+  const fontUrls = {
+    bodyRegular: 'https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-400-normal.ttf',
+    bodyBold:    'https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-600-normal.ttf',
+    bodyItalic:  'https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-400-italic.ttf',
+    display:     'https://cdn.jsdelivr.net/fontsource/fonts/space-grotesk@latest/latin-600-normal.ttf',
+  };
+
+  if (fontkitAvailable) {
+    const [b, bb, bi, d] = await Promise.all([
+      loadFontBytes(fontUrls.bodyRegular),
+      loadFontBytes(fontUrls.bodyBold),
+      loadFontBytes(fontUrls.bodyItalic),
+      loadFontBytes(fontUrls.display),
+    ]);
+    try {
+      if (b)  bodyFont       = await doc.embedFont(b);
+      if (bb) bodyBoldFont   = await doc.embedFont(bb);
+      if (bi) bodyItalicFont = await doc.embedFont(bi);
+      if (d)  displayFont    = await doc.embedFont(d);
+    } catch (err) {
+      console.warn('[Fonts] Embed failed, falling back to Helvetica:', err);
+    }
+  }
+
+  // Helvetica fallback for any fonts that didn't load
+  const helv     = await doc.embedFont(StandardFonts.Helvetica);
+  const helvBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const helvOb   = await doc.embedFont(StandardFonts.HelveticaOblique);
+
+  // Final font assignments — Inter for body, Space Grotesk for display
+  const body    = bodyFont       || helv;
+  const bodyB   = bodyBoldFont   || helvBold;
+  const bodyI   = bodyItalicFont || helvOb;
+  const display = displayFont    || helvBold;
+
+  // If we got real TTF fonts, they support Unicode — no need to strip smart
+  // quotes, em dashes, arrows, etc. Only sanitise on Helvetica fallback.
+  const usingRealFonts = !!(bodyFont && bodyBoldFont && displayFont);
+  const safeText = (txt) => usingRealFonts
+    ? String(txt == null ? '' : txt)
+    : sanitiseForPdf(String(txt == null ? '' : txt));
 
   // Pathed brand colours (converted from HSL to RGB)
   const C = {
@@ -1297,50 +1384,50 @@ async function renderSowPdf(work, client, sowHtml) {
   page.drawEllipse({ x: W * 0.6, y: H - 130, xScale: 180, yScale: 90,  color: C.cyan,   opacity: 0.14 });
   page.drawEllipse({ x: W,      y: H - 40,  xScale: 200, yScale: 80,  color: C.teal,   opacity: 0.18 });
 
-  // Helper to draw text safely (sanitised for WinAnsi)
-  const t = (txt) => sanitiseForPdf(String(txt == null ? '' : txt));
+  // Helper to draw text safely (sanitised only when falling back to Helvetica)
+  const t = safeText;
 
-  // Logo mark — two dots + wordmark
+  // Logo mark — two dots + wordmark (Space Grotesk)
   page.drawCircle({ x: MARGIN,        y: H - 56, size: 4, color: C.cyan });
   page.drawText(t('Pathed'), {
-    x: MARGIN + 12, y: H - 62, size: 18, font: helvBold, color: C.fore,
+    x: MARGIN + 12, y: H - 62, size: 18, font: display, color: C.fore,
   });
   page.drawCircle({ x: MARGIN + 76, y: H - 50, size: 4, color: C.teal });
   page.drawText(t('C O N S U L T I N G'), {
-    x: MARGIN + 12, y: H - 76, size: 6.5, font: helv, color: C.mute,
+    x: MARGIN + 12, y: H - 76, size: 6.5, font: body, color: C.mute,
     characterSpacing: 1.2,
   });
 
   // Document title
   page.drawText(t('STATEMENT OF WORK'), {
-    x: MARGIN, y: H - 105, size: 10, font: helvBold, color: C.cyan,
+    x: MARGIN, y: H - 105, size: 10, font: bodyB, color: C.cyan,
     characterSpacing: 2.5,
   });
   page.drawText(t(client.companyName), {
-    x: MARGIN, y: H - 128, size: 22, font: helvBold, color: C.fore,
+    x: MARGIN, y: H - 128, size: 22, font: display, color: C.fore,
   });
 
   // Right side: ref + date
   const refText = work.sowRef || nextSowRef();
   const dateText = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   page.drawText(t('REFERENCE'), {
-    x: W - MARGIN - 130, y: H - 50, size: 7, font: helvBold, color: C.mute, characterSpacing: 1.5,
+    x: W - MARGIN - 130, y: H - 50, size: 7, font: bodyB, color: C.mute, characterSpacing: 1.5,
   });
   page.drawText(t(refText), {
-    x: W - MARGIN - 130, y: H - 65, size: 11, font: helvBold, color: C.fore,
+    x: W - MARGIN - 130, y: H - 65, size: 11, font: bodyB, color: C.fore,
   });
   page.drawText(t('ISSUED'), {
-    x: W - MARGIN - 130, y: H - 90, size: 7, font: helvBold, color: C.mute, characterSpacing: 1.5,
+    x: W - MARGIN - 130, y: H - 90, size: 7, font: bodyB, color: C.mute, characterSpacing: 1.5,
   });
   page.drawText(t(dateText), {
-    x: W - MARGIN - 130, y: H - 105, size: 11, font: helv, color: C.fore,
+    x: W - MARGIN - 130, y: H - 105, size: 11, font: body, color: C.fore,
   });
 
   // ── Body ──────────────────────────────────────
   let y = H - 180;
   const drawSectionHeader = (text) => {
     page.drawText(t(text.toUpperCase()), {
-      x: MARGIN, y, size: 8.5, font: helvBold, color: C.purple, characterSpacing: 1.5,
+      x: MARGIN, y, size: 8.5, font: bodyB, color: C.purple, characterSpacing: 1.5,
     });
     y -= 8;
     page.drawLine({
@@ -1359,11 +1446,11 @@ async function renderSowPdf(work, client, sowHtml) {
 
   const drawParty = (x, heading, lines) => {
     let yy = y;
-    page.drawText(t(heading), { x, y: yy, size: 9, font: helvBold, color: C.textMute });
+    page.drawText(t(heading), { x, y: yy, size: 9, font: bodyB, color: C.textMute });
     yy -= 14;
     lines.forEach(line => {
       if (!line) return;
-      page.drawText(t(line), { x, y: yy, size: 10, font: helv, color: C.text });
+      page.drawText(t(line), { x, y: yy, size: 10, font: body, color: C.text });
       yy -= 13;
     });
     return yy;
@@ -1371,8 +1458,8 @@ async function renderSowPdf(work, client, sowHtml) {
 
   const supplierLines = [
     state.settings.bizName || 'Pathed Consulting',
-    state.settings.bizEmail || 'hello@pathed.co.uk',
-    'pathed.co.uk',
+    state.settings.bizEmail || 'hello@pathedconsulting.co.uk',
+    'pathedconsulting.co.uk',
   ];
   const clientLines = [
     client.companyName,
@@ -1397,17 +1484,17 @@ async function renderSowPdf(work, client, sowHtml) {
   summaryItems.forEach((item, i) => {
     const cx = MARGIN + (cellW + 12) * i;
     page.drawText(t(item.label.toUpperCase()), {
-      x: cx, y, size: 7, font: helvBold, color: C.textMute, characterSpacing: 1.2,
+      x: cx, y, size: 7, font: bodyB, color: C.textMute, characterSpacing: 1.2,
     });
     page.drawText(t(item.value || '-'), {
-      x: cx, y: y - 14, size: 10.5, font: helvBold, color: C.text,
+      x: cx, y: y - 14, size: 10.5, font: bodyB, color: C.text,
     });
   });
   y -= 38;
 
   // Scope of work — rendered from SoW HTML
   drawSectionHeader('Scope of Work');
-  y = renderSowContent(page, doc, helv, helvBold, helvOb, sowHtml, MARGIN, y, W - MARGIN * 2, C);
+  y = renderSowContent(page, doc, body, bodyB, bodyI, sowHtml, MARGIN, y, W - MARGIN * 2, C, safeText);
   y -= 10;
 
   // Commercials
@@ -1424,12 +1511,12 @@ async function renderSowPdf(work, client, sowHtml) {
   ];
   rows.forEach((row, i) => {
     const isTotal = row[0] === 'Total';
-    page.drawText(t(row[0]), { x: MARGIN, y, size: 10, font: isTotal ? helvBold : helv, color: C.text });
+    page.drawText(t(row[0]), { x: MARGIN, y, size: 10, font: isTotal ? bodyB : body, color: C.text });
     const sanitisedVal = t(row[1]);
-    const valW = helvBold.widthOfTextAtSize(sanitisedVal, 10.5);
+    const valW = bodyB.widthOfTextAtSize(sanitisedVal, 10.5);
     page.drawText(sanitisedVal, {
       x: W - MARGIN - valW, y, size: isTotal ? 11 : 10,
-      font: helvBold, color: isTotal ? C.purple : C.text,
+      font: bodyB, color: isTotal ? C.purple : C.text,
     });
     y -= 18;
     if (isTotal) {
@@ -1451,9 +1538,9 @@ async function renderSowPdf(work, client, sowHtml) {
     'Work will commence on the agreed start date once acceptance has been received.',
   ];
   approvalLines.forEach(line => {
-    const wrapped = wrapText(t(line), helv, 10.5, W - MARGIN * 2);
+    const wrapped = wrapText(t(line), body, 10.5, W - MARGIN * 2);
     wrapped.forEach(l => {
-      page.drawText(l, { x: MARGIN, y, size: 10.5, font: helv, color: C.text });
+      page.drawText(l, { x: MARGIN, y, size: 10.5, font: body, color: C.text });
       y -= 15;
     });
     y -= 4;
@@ -1467,11 +1554,11 @@ async function renderSowPdf(work, client, sowHtml) {
       thickness: 0.5, color: C.lineLight,
     });
     p.drawText(t(`${state.settings.bizName || 'Pathed Consulting'} - Bridging data engineering and enterprise revenue`), {
-      x: MARGIN, y: 32, size: 8, font: helv, color: C.textMute,
+      x: MARGIN, y: 32, size: 8, font: body, color: C.textMute,
     });
     const pageNum = `${i + 1} / ${doc.getPageCount()}`;
-    const pnW = helv.widthOfTextAtSize(pageNum, 8);
-    p.drawText(pageNum, { x: W - MARGIN - pnW, y: 32, size: 8, font: helv, color: C.textMute });
+    const pnW = body.widthOfTextAtSize(pageNum, 8);
+    p.drawText(pageNum, { x: W - MARGIN - pnW, y: 32, size: 8, font: body, color: C.textMute });
   });
 
   // Download
@@ -1528,11 +1615,14 @@ function wrapText(text, font, size, maxWidth) {
 // Render SoW HTML content. We do a lightweight HTML-to-PDF translation:
 // h2/h3 → bold heading, p → paragraph, ul/ol → bulleted/numbered list,
 // strong/em → inline weight/style. No tables or images.
-function renderSowContent(page, doc, helv, helvBold, helvOb, html, x, startY, maxWidth, C) {
+function renderSowContent(page, doc, helv, helvBold, helvOb, html, x, startY, maxWidth, C, safeText) {
   let y = startY;
   const lineHeight = 14;
   const paraGap    = 8;
   const headingGap = 12;
+  // Use the caller's safeText if provided (handles Helvetica fallback);
+  // otherwise sanitise unconditionally (safe default).
+  const clean = safeText || ((s) => sanitiseForPdf(String(s == null ? '' : s)));
 
   // Parse the HTML into a temporary DOM
   const wrapper = document.createElement('div');
@@ -1546,7 +1636,7 @@ function renderSowContent(page, doc, helv, helvBold, helvOb, html, x, startY, ma
   };
 
   const drawWrappedLine = (text, font, size, color, indent = 0) => {
-    const cleaned = sanitiseForPdf(text);
+    const cleaned = clean(text);
     const lines = wrapText(cleaned, font, size, maxWidth - indent);
     lines.forEach(line => {
       newPageIfNeeded(lineHeight);
