@@ -891,3 +891,104 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
   .stats-grid { grid-template-columns: 1fr; }
   .form-row { grid-template-columns: 1fr; }
 }
+
+/* =============================================
+   SOW EDITOR (Quill + Pathed dark theme)
+   ============================================= */
+
+/* Wider modal when the SoW editor is present */
+.modal.modal-wide {
+  max-width: 760px;
+}
+
+.sow-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.sow-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.sow-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--fore);
+  margin-bottom: 4px;
+}
+
+.sow-hint {
+  font-size: 0.75rem;
+  color: var(--mute);
+  margin: 0;
+}
+
+/* Quill — make it feel native to Pathed */
+.sow-editor {
+  background: var(--deep);
+  border-radius: 12px;
+  min-height: 240px;
+}
+
+.ql-toolbar.ql-snow {
+  background: hsl(240 45% 14%);
+  border: 1px solid var(--border) !important;
+  border-bottom: none !important;
+  border-radius: 12px 12px 0 0;
+  padding: 8px 10px !important;
+}
+
+.ql-container.ql-snow {
+  background: var(--deep);
+  border: 1px solid var(--border) !important;
+  border-radius: 0 0 12px 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.875rem;
+}
+
+.ql-editor {
+  min-height: 240px;
+  color: var(--fore);
+  line-height: 1.6;
+  padding: 16px 18px !important;
+}
+
+.ql-editor.ql-blank::before {
+  color: var(--mute);
+  font-style: normal;
+  font-family: 'Inter', sans-serif;
+}
+
+.ql-editor h2, .ql-editor h3 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fore);
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+.ql-editor h2 { font-size: 1.15rem; }
+.ql-editor h3 { font-size: 1rem; }
+.ql-editor p  { margin: 0 0 10px; }
+.ql-editor ul, .ql-editor ol { padding-left: 24px; margin: 0 0 10px; }
+.ql-editor strong { font-weight: 600; color: var(--fore); }
+
+/* Toolbar icons — recolour for dark theme */
+.ql-snow .ql-stroke { stroke: var(--mute); }
+.ql-snow .ql-fill   { fill:   var(--mute); }
+.ql-snow .ql-picker { color:  var(--mute); }
+.ql-snow .ql-picker-options { background: var(--card); border-color: var(--border); }
+.ql-snow .ql-picker-item    { color: var(--fore); }
+.ql-snow .ql-active .ql-stroke,
+.ql-snow .ql-picker-label:hover .ql-stroke,
+.ql-snow button:hover .ql-stroke { stroke: var(--primary); }
+.ql-snow .ql-active .ql-fill,
+.ql-snow button:hover .ql-fill   { fill:   var(--primary); }
+.ql-snow .ql-active,
+.ql-snow .ql-picker-label:hover  { color:  var(--primary); }
