@@ -992,3 +992,12 @@ input, select, textarea { font-family: 'Inter', sans-serif; }
 .ql-snow button:hover .ql-fill   { fill:   var(--primary); }
 .ql-snow .ql-active,
 .ql-snow .ql-picker-label:hover  { color:  var(--primary); }
+
+
+/* Modal save button — saving state */
+.btn-primary.btn-saving,
+.btn-primary:disabled {
+  opacity: 0.75;
+  cursor: progress;
+  pointer-events: none;
+}
