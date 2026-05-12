@@ -67,10 +67,21 @@ function openModal(title, bodyHTML, onConfirm, confirmLabel = 'Save') {
   document.getElementById('modal-confirm').onclick = () => {
     if (onConfirm()) closeModal();
   };
+
+  // If a SoW editor div is present, boot Quill on it
+  if (document.getElementById('wf-sow-editor') && typeof window.initSowEditor === 'function') {
+    setTimeout(window.initSowEditor, 50);
+  }
 }
 
 function closeModal() {
   document.getElementById('modal-overlay').classList.remove('open');
+  // Clean up wide modal class + Quill instance
+  const modal = document.getElementById('modal');
+  if (modal) modal.classList.remove('modal-wide');
+  if (window._sowQuill) {
+    window._sowQuill = null;
+  }
 }
 
 document.getElementById('modal-overlay').addEventListener('click', e => {
@@ -344,7 +355,7 @@ document.getElementById('btn-new-work').addEventListener('click', () => {
   openModal('Log Consultancy Work', workForm(), () => {
     const data = readWorkForm();
     if (!data) return false;
-    const work = { id: uid(), ...data };
+    const work = { id: uid(), sowRef: nextSowRef(), ...data };
     state.work.push(work);
     save('work');
     renderWork();
@@ -355,6 +366,18 @@ document.getElementById('btn-new-work').addEventListener('click', () => {
     return true;
   });
 });
+
+// Auto-incrementing SoW reference: SOW-YYYY-NNN
+function nextSowRef() {
+  const year = new Date().getFullYear();
+  const existing = state.work
+    .map(w => w.sowRef || '')
+    .filter(r => r.startsWith(`SOW-${year}-`))
+    .map(r => parseInt(r.slice(`SOW-${year}-`.length), 10))
+    .filter(n => !isNaN(n));
+  const next = (existing.length ? Math.max(...existing) : 0) + 1;
+  return `SOW-${year}-${String(next).padStart(3, '0')}`;
+}
 
 function editWork(id) {
   const w = state.work.find(x => x.id === id);
@@ -385,6 +408,17 @@ function workForm(w = {}) {
   const clientOptions = state.clients.map(c =>
     `<option value="${c.id}" ${w.clientId === c.id ? 'selected' : ''}>${c.companyName}</option>`
   ).join('');
+
+  // Default SoW template if none yet — gives the user a structured starting point
+  const defaultSow = `<h3>Background</h3><p>Describe the client context and what's driving this engagement.</p><h3>Scope of work</h3><p>What will be delivered. Be specific.</p><h3>Deliverables</h3><ul><li>Item one</li><li>Item two</li></ul><h3>Out of scope</h3><p>What this engagement does <em>not</em> cover.</p><h3>Timeline</h3><p>Key dates and milestones.</p><h3>Acceptance criteria</h3><p>What does &ldquo;done&rdquo; look like?</p>`;
+
+  // Use existing SoW HTML if present, otherwise template
+  const sowHtml = (w.sow && w.sow.trim()) ? w.sow : defaultSow;
+  // Mark the modal as wide so the editor has room
+  setTimeout(() => {
+    const modal = document.getElementById('modal');
+    if (modal) modal.classList.add('modal-wide');
+  }, 0);
 
   return `
     <div class="form-row">
@@ -438,11 +472,53 @@ function workForm(w = {}) {
         </select>
       </div>
       <div class="form-group">
-        <label>Notes / Deliverables</label>
-        <input type="text" id="wf-notes" value="${w.notes || ''}" placeholder="Optional" />
+        <label>Internal Notes</label>
+        <input type="text" id="wf-notes" value="${w.notes || ''}" placeholder="For your eyes only (not in SoW)" />
       </div>
-    </div>`;
+    </div>
+
+    <div class="sow-section">
+      <div class="sow-section-header">
+        <div>
+          <label class="sow-label">Statement of Work</label>
+          <p class="sow-hint">Client-facing content. This will appear in the generated SoW PDF.</p>
+        </div>
+        ${w.id ? `<button type="button" class="btn-secondary btn-sm" onclick="generateSowPdf('${w.id}')">Generate SoW PDF</button>` : ''}
+      </div>
+      <div id="wf-sow-editor" class="sow-editor">${sowHtml}</div>
+    </div>
+  `;
 }
+
+// Initialise the Quill editor lazily after the modal renders.
+// Quill is loaded from CDN in index.html. We attach it to #wf-sow-editor.
+window.initSowEditor = function() {
+  if (typeof Quill === 'undefined') return;
+  const el = document.getElementById('wf-sow-editor');
+  if (!el || el.classList.contains('ql-container')) return;
+
+  // Move the existing HTML content into a "load" var, then clear and let Quill reinitialise
+  const initialHtml = el.innerHTML;
+  el.innerHTML = '';
+
+  window._sowQuill = new Quill('#wf-sow-editor', {
+    theme: 'snow',
+    placeholder: 'Write the Statement of Work…',
+    modules: {
+      toolbar: [
+        [{ header: [2, 3, false] }],
+        ['bold', 'italic'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        ['clean'],
+      ],
+    },
+  });
+
+  // Populate Quill with the existing content
+  if (initialHtml) {
+    window._sowQuill.clipboard.dangerouslyPasteHTML(initialHtml);
+  }
+};
 
 window.prefillRate = function() {
   const clientId = document.getElementById('wf-client').value;
@@ -461,6 +537,14 @@ function readWorkForm() {
     toast('Please fill in all required fields', 'error');
     return null;
   }
+  // Read SoW HTML from Quill (or fall back to whatever's in the div)
+  let sowHtml = '';
+  if (window._sowQuill) {
+    sowHtml = window._sowQuill.root.innerHTML;
+  } else {
+    const el = document.getElementById('wf-sow-editor');
+    if (el) sowHtml = el.innerHTML;
+  }
   return {
     clientId,
     date,
@@ -470,6 +554,7 @@ function readWorkForm() {
     location:      document.getElementById('wf-location').value,
     status:        document.getElementById('wf-status').value,
     notes:         document.getElementById('wf-notes').value.trim(),
+    sow:           sowHtml,
   };
 }
 
@@ -500,6 +585,11 @@ function renderPipeline() {
         ? `<button class="btn-sm" onclick="moveWork('${w.id}','ready')">→ Ready to Invoice</button>`
         : `<button class="btn-sm" onclick="moveWork('${w.id}','confirmed')">→ Confirm</button>`;
 
+      // SoW buttons available on every card
+      const sowButtons = `
+        <button class="btn-sm" onclick="generateSowPdf('${w.id}')" title="Generate SoW PDF">SoW PDF</button>
+        <button class="btn-sm" onclick="emailSowToClient('${w.id}')" title="Email SoW to client">Email</button>`;
+
       return `
         <div class="pipeline-card">
           <div class="pipeline-card-client">${client ? client.companyName : 'Unknown'}</div>
@@ -508,7 +598,7 @@ function renderPipeline() {
             <span>${formatDate(w.date)} · ${w.duration}</span>
             <span class="pipeline-card-value">£${parseFloat(w.confirmedRate).toLocaleString('en-GB')}</span>
           </div>
-          <div class="pipeline-card-actions">${extraBtn}</div>
+          <div class="pipeline-card-actions">${sowButtons}${extraBtn}</div>
         </div>`;
     }).join('');
   });
@@ -598,11 +688,14 @@ function renderSettings() {
   if (s.bizEmail)       document.getElementById('biz-email').value        = s.bizEmail;
   if (s.bizVat)         document.getElementById('biz-vat').value          = s.bizVat;
   if (s.bizRate)        document.getElementById('biz-rate').value         = s.bizRate;
+  const ptEl = document.getElementById('biz-payment-terms');
+  if (ptEl && s.paymentTermsDays) ptEl.value = s.paymentTermsDays;
   updateBadges();
 }
 
 document.getElementById('btn-save-settings').addEventListener('click', () => {
   state.settings = {
+    ...state.settings,  // preserve OAuth tokens
     faClientId:     document.getElementById('fa-client-id').value.trim(),
     faClientSecret: document.getElementById('fa-client-secret').value.trim(),
     faEnv:          document.getElementById('fa-sandbox').value,
@@ -612,6 +705,7 @@ document.getElementById('btn-save-settings').addEventListener('click', () => {
     bizEmail:       document.getElementById('biz-email').value.trim(),
     bizVat:         document.getElementById('biz-vat').value.trim(),
     bizRate:        document.getElementById('biz-rate').value.trim(),
+    paymentTermsDays: parseInt(document.getElementById('biz-payment-terms')?.value || '30', 10) || 30,
   };
   save('settings');
   updateBadges();
@@ -1123,6 +1217,416 @@ function initials(name) {
 function statusLabel(s) {
   return { planned: 'Planned', confirmed: 'Confirmed', ready: 'Ready to Invoice', invoiced: 'Invoiced' }[s] || s;
 }
+
+// ─── SOW PDF GENERATION ───────────────────────
+// Generates a Pathed-branded PDF Statement of Work using pdf-lib.
+// Loaded from CDN in index.html as a global PDFLib.
+
+async function generateSowPdf(workId) {
+  const work = state.work.find(w => w.id === workId);
+  if (!work) { toast('Work entry not found', 'error'); return; }
+  const client = state.clients.find(c => c.id === work.clientId);
+  if (!client) { toast('Client not found', 'error'); return; }
+
+  if (typeof PDFLib === 'undefined') {
+    toast('PDF library still loading — try again in a moment', 'error');
+    return;
+  }
+
+  // Save the work first so the SoW content is current. If the form's open,
+  // pull the live HTML; otherwise use what's saved.
+  let sowHtml = work.sow || '';
+  if (window._sowQuill && document.getElementById('wf-sow-editor')) {
+    sowHtml = window._sowQuill.root.innerHTML;
+    work.sow = sowHtml;
+    save('work');
+  }
+  // Ensure a SoW reference exists (for backfilled work entries)
+  if (!work.sowRef) {
+    work.sowRef = nextSowRef();
+    save('work');
+  }
+
+  try {
+    await renderSowPdf(work, client, sowHtml);
+    toast('SoW PDF downloaded', 'success');
+  } catch (err) {
+    console.error('[SoW PDF] Failed:', err);
+    toast('Could not generate SoW PDF', 'error');
+  }
+}
+window.generateSowPdf = generateSowPdf;
+
+async function renderSowPdf(work, client, sowHtml) {
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const doc = await PDFDocument.create();
+  doc.setTitle(`Statement of Work — ${client.companyName}`);
+  doc.setAuthor(state.settings.bizName || 'Pathed Consulting');
+  doc.setCreator('Pathed Hub');
+
+  const helv      = await doc.embedFont(StandardFonts.Helvetica);
+  const helvBold  = await doc.embedFont(StandardFonts.HelveticaBold);
+  const helvOb    = await doc.embedFont(StandardFonts.HelveticaOblique);
+
+  // Pathed brand colours (converted from HSL to RGB)
+  const C = {
+    deep:    rgb(0.039, 0.039, 0.122),  // Surface Deep
+    card:    rgb(0.086, 0.086, 0.169),  // Surface Card
+    fore:    rgb(0.949, 0.949, 0.961),  // Brand Fore
+    mute:    rgb(0.671, 0.671, 0.722),  // Brand Mute
+    purple:  rgb(0.659, 0.333, 0.969),  // Primary
+    cyan:    rgb(0.310, 0.765, 0.969),  // Brand Cyan
+    teal:    rgb(0.204, 0.847, 0.690),  // Brand Teal
+    border:  rgb(0.176, 0.141, 0.322),  // Border
+    text:    rgb(0.12, 0.12, 0.16),     // Dark text for light pages
+    textMute:rgb(0.40, 0.40, 0.45),
+    bgLight: rgb(0.98, 0.98, 0.99),
+    lineLight: rgb(0.88, 0.88, 0.92),
+  };
+
+  // A4 portrait
+  const W = 595.28, H = 841.89;
+  const MARGIN = 56;
+  let page = doc.addPage([W, H]);
+
+  // ── Cover band (top 140px) ────────────────────
+  page.drawRectangle({ x: 0, y: H - 140, width: W, height: 140, color: C.deep });
+
+  // Aurora-ish accents using overlapping ellipses
+  page.drawEllipse({ x: 0,      y: H - 80,  xScale: 220, yScale: 110, color: C.purple, opacity: 0.22 });
+  page.drawEllipse({ x: W * 0.6, y: H - 130, xScale: 180, yScale: 90,  color: C.cyan,   opacity: 0.14 });
+  page.drawEllipse({ x: W,      y: H - 40,  xScale: 200, yScale: 80,  color: C.teal,   opacity: 0.18 });
+
+  // Helper to draw text safely (sanitised for WinAnsi)
+  const t = (txt) => sanitiseForPdf(String(txt == null ? '' : txt));
+
+  // Logo mark — two dots + wordmark
+  page.drawCircle({ x: MARGIN,        y: H - 56, size: 4, color: C.cyan });
+  page.drawText(t('Pathed'), {
+    x: MARGIN + 12, y: H - 62, size: 18, font: helvBold, color: C.fore,
+  });
+  page.drawCircle({ x: MARGIN + 76, y: H - 50, size: 4, color: C.teal });
+  page.drawText(t('C O N S U L T I N G'), {
+    x: MARGIN + 12, y: H - 76, size: 6.5, font: helv, color: C.mute,
+    characterSpacing: 1.2,
+  });
+
+  // Document title
+  page.drawText(t('STATEMENT OF WORK'), {
+    x: MARGIN, y: H - 105, size: 10, font: helvBold, color: C.cyan,
+    characterSpacing: 2.5,
+  });
+  page.drawText(t(client.companyName), {
+    x: MARGIN, y: H - 128, size: 22, font: helvBold, color: C.fore,
+  });
+
+  // Right side: ref + date
+  const refText = work.sowRef || nextSowRef();
+  const dateText = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  page.drawText(t('REFERENCE'), {
+    x: W - MARGIN - 130, y: H - 50, size: 7, font: helvBold, color: C.mute, characterSpacing: 1.5,
+  });
+  page.drawText(t(refText), {
+    x: W - MARGIN - 130, y: H - 65, size: 11, font: helvBold, color: C.fore,
+  });
+  page.drawText(t('ISSUED'), {
+    x: W - MARGIN - 130, y: H - 90, size: 7, font: helvBold, color: C.mute, characterSpacing: 1.5,
+  });
+  page.drawText(t(dateText), {
+    x: W - MARGIN - 130, y: H - 105, size: 11, font: helv, color: C.fore,
+  });
+
+  // ── Body ──────────────────────────────────────
+  let y = H - 180;
+  const drawSectionHeader = (text) => {
+    page.drawText(t(text.toUpperCase()), {
+      x: MARGIN, y, size: 8.5, font: helvBold, color: C.purple, characterSpacing: 1.5,
+    });
+    y -= 8;
+    page.drawLine({
+      start: { x: MARGIN, y },
+      end:   { x: W - MARGIN, y },
+      thickness: 0.5, color: C.lineLight,
+    });
+    y -= 18;
+  };
+
+  // Parties block — two columns
+  drawSectionHeader('Parties');
+  const colW = (W - MARGIN * 2 - 24) / 2;
+  const colX1 = MARGIN;
+  const colX2 = MARGIN + colW + 24;
+
+  const drawParty = (x, heading, lines) => {
+    let yy = y;
+    page.drawText(t(heading), { x, y: yy, size: 9, font: helvBold, color: C.textMute });
+    yy -= 14;
+    lines.forEach(line => {
+      if (!line) return;
+      page.drawText(t(line), { x, y: yy, size: 10, font: helv, color: C.text });
+      yy -= 13;
+    });
+    return yy;
+  };
+
+  const supplierLines = [
+    state.settings.bizName || 'Pathed Consulting',
+    state.settings.bizEmail || 'hello@pathed.co.uk',
+    'pathed.co.uk',
+  ];
+  const clientLines = [
+    client.companyName,
+    `${client.contactFirstName || ''} ${client.contactLastName || ''}`.trim(),
+    client.email || '',
+    client.billingAddress || '',
+  ].filter(Boolean);
+
+  const y1 = drawParty(colX1, 'SUPPLIER', supplierLines);
+  const y2 = drawParty(colX2, 'CLIENT',   clientLines);
+  y = Math.min(y1, y2) - 18;
+
+  // Engagement summary — four small stat-like fields
+  drawSectionHeader('Engagement');
+  const summaryItems = [
+    { label: 'Work',     value: work.workType },
+    { label: 'Date',     value: formatDate(work.date) },
+    { label: 'Duration', value: work.duration },
+    { label: 'Location', value: work.location || 'Remote' },
+  ];
+  const cellW = (W - MARGIN * 2 - 36) / 4;
+  summaryItems.forEach((item, i) => {
+    const cx = MARGIN + (cellW + 12) * i;
+    page.drawText(t(item.label.toUpperCase()), {
+      x: cx, y, size: 7, font: helvBold, color: C.textMute, characterSpacing: 1.2,
+    });
+    page.drawText(t(item.value || '-'), {
+      x: cx, y: y - 14, size: 10.5, font: helvBold, color: C.text,
+    });
+  });
+  y -= 38;
+
+  // Scope of work — rendered from SoW HTML
+  drawSectionHeader('Scope of Work');
+  y = renderSowContent(page, doc, helv, helvBold, helvOb, sowHtml, MARGIN, y, W - MARGIN * 2, C);
+  y -= 10;
+
+  // Commercials
+  if (y < 200) { page = doc.addPage([W, H]); y = H - MARGIN; }
+  drawSectionHeader('Commercials');
+  const days = work.duration === 'Half Day' ? 0.5 : 1;
+  const total = days * (work.confirmedRate || 0);
+  const rows = [
+    ['Day rate',         `£${(work.confirmedRate || 0).toLocaleString('en-GB')}`],
+    ['Duration',         `${days} ${days === 1 ? 'day' : 'days'}`],
+    ['Total',            `£${total.toLocaleString('en-GB')}`],
+    ['Payment terms',    `${state.settings.paymentTermsDays || 30} days net`],
+    ['Invoicing',        'Issued via FreeAgent on completion'],
+  ];
+  rows.forEach((row, i) => {
+    const isTotal = row[0] === 'Total';
+    page.drawText(t(row[0]), { x: MARGIN, y, size: 10, font: isTotal ? helvBold : helv, color: C.text });
+    const sanitisedVal = t(row[1]);
+    const valW = helvBold.widthOfTextAtSize(sanitisedVal, 10.5);
+    page.drawText(sanitisedVal, {
+      x: W - MARGIN - valW, y, size: isTotal ? 11 : 10,
+      font: helvBold, color: isTotal ? C.purple : C.text,
+    });
+    y -= 18;
+    if (isTotal) {
+      page.drawLine({
+        start: { x: MARGIN, y: y + 6 },
+        end:   { x: W - MARGIN, y: y + 6 },
+        thickness: 0.5, color: C.lineLight,
+      });
+      y -= 4;
+    }
+  });
+  y -= 10;
+
+  // Approval
+  if (y < 140) { page = doc.addPage([W, H]); y = H - MARGIN; }
+  drawSectionHeader('Approval');
+  const approvalLines = [
+    'By return email to the address above, please confirm acceptance of this Statement of Work.',
+    'Work will commence on the agreed start date once acceptance has been received.',
+  ];
+  approvalLines.forEach(line => {
+    const wrapped = wrapText(t(line), helv, 10.5, W - MARGIN * 2);
+    wrapped.forEach(l => {
+      page.drawText(l, { x: MARGIN, y, size: 10.5, font: helv, color: C.text });
+      y -= 15;
+    });
+    y -= 4;
+  });
+
+  // Footer on every page
+  doc.getPages().forEach((p, i) => {
+    p.drawLine({
+      start: { x: MARGIN, y: 48 },
+      end:   { x: W - MARGIN, y: 48 },
+      thickness: 0.5, color: C.lineLight,
+    });
+    p.drawText(t(`${state.settings.bizName || 'Pathed Consulting'} - Bridging data engineering and enterprise revenue`), {
+      x: MARGIN, y: 32, size: 8, font: helv, color: C.textMute,
+    });
+    const pageNum = `${i + 1} / ${doc.getPageCount()}`;
+    const pnW = helv.widthOfTextAtSize(pageNum, 8);
+    p.drawText(pageNum, { x: W - MARGIN - pnW, y: 32, size: 8, font: helv, color: C.textMute });
+  });
+
+  // Download
+  const bytes = await doc.save();
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeClient = client.companyName.replace(/[^a-z0-9]+/gi, '-');
+  a.href = url;
+  a.download = `${work.sowRef || 'SOW'}-${safeClient}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+
+  // Store the last-generated PDF blob and metadata so we can also offer
+  // "Email to client" without re-rendering
+  window._lastSowPdf = {
+    blob, fileName: a.download, work, client,
+  };
+}
+
+// Replace Unicode chars not in WinAnsi (which pdf-lib's standard fonts use)
+function sanitiseForPdf(text) {
+  if (!text) return '';
+  return text
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")   // smart single quotes → '
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')   // smart double quotes → "
+    .replace(/[\u2013\u2014]/g, '-')                // en/em dash → -
+    .replace(/\u2026/g, '...')                      // ellipsis → ...
+    .replace(/\u2022/g, '*')                        // bullet
+    .replace(/[\u00A0]/g, ' ')                      // non-breaking space → space
+    .replace(/\u2192/g, '->')                       // right arrow → ->
+    .replace(/[^\x00-\xFF]/g, '');                  // strip remaining non-WinAnsi
+}
+
+// Word-wrap helper
+function wrapText(text, font, size, maxWidth) {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (font.widthOfTextAtSize(test, size) <= maxWidth) {
+      line = test;
+    } else {
+      if (line) lines.push(line);
+      line = w;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// Render SoW HTML content. We do a lightweight HTML-to-PDF translation:
+// h2/h3 → bold heading, p → paragraph, ul/ol → bulleted/numbered list,
+// strong/em → inline weight/style. No tables or images.
+function renderSowContent(page, doc, helv, helvBold, helvOb, html, x, startY, maxWidth, C) {
+  let y = startY;
+  const lineHeight = 14;
+  const paraGap    = 8;
+  const headingGap = 12;
+
+  // Parse the HTML into a temporary DOM
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = html || '';
+
+  const newPageIfNeeded = (needed = lineHeight) => {
+    if (y - needed < 80) {
+      page = doc.addPage([page.getWidth(), page.getHeight()]);
+      y = page.getHeight() - 56;
+    }
+  };
+
+  const drawWrappedLine = (text, font, size, color, indent = 0) => {
+    const cleaned = sanitiseForPdf(text);
+    const lines = wrapText(cleaned, font, size, maxWidth - indent);
+    lines.forEach(line => {
+      newPageIfNeeded(lineHeight);
+      page.drawText(line, { x: x + indent, y, size, font, color });
+      y -= lineHeight;
+    });
+  };
+
+  // Extract plain text and basic structure from each block element
+  const blocks = Array.from(wrapper.children);
+  blocks.forEach(block => {
+    const tag = block.tagName.toLowerCase();
+    const text = (block.textContent || '').trim();
+    if (!text && tag !== 'ul' && tag !== 'ol') return;
+
+    if (tag === 'h2' || tag === 'h3') {
+      newPageIfNeeded(lineHeight + headingGap);
+      y -= 4;
+      drawWrappedLine(text, helvBold, tag === 'h2' ? 12 : 11, C.text);
+      y -= 4;
+    } else if (tag === 'ul' || tag === 'ol') {
+      const items = Array.from(block.querySelectorAll('li'));
+      items.forEach((li, i) => {
+        newPageIfNeeded(lineHeight);
+        if (tag === 'ol') {
+          page.drawText(`${i + 1}.`, { x: x + 4, y, size: 10.5, font: helv, color: C.text });
+        } else {
+          // Draw a small filled circle as a bullet — avoids font encoding issues
+          page.drawCircle({ x: x + 8, y: y + 3, size: 1.6, color: C.purple });
+        }
+        drawWrappedLine((li.textContent || '').trim(), helv, 10.5, C.text, 20);
+        y -= 2;
+      });
+      y -= paraGap - 2;
+    } else {
+      // Treat as paragraph
+      drawWrappedLine(text, helv, 10.5, C.text);
+      y -= paraGap;
+    }
+  });
+
+  return y;
+}
+
+// ─── EMAIL SOW TO CLIENT ──────────────────────
+window.emailSowToClient = function(workId) {
+  const work = state.work.find(w => w.id === workId);
+  if (!work) { toast('Work entry not found', 'error'); return; }
+  const client = state.clients.find(c => c.id === work.clientId);
+  if (!client || !client.email) {
+    toast('Client has no email address', 'error');
+    return;
+  }
+
+  const supplier = state.settings.bizName || 'Pathed Consulting';
+  const sender   = state.settings.bizEmail || '';
+  const ref      = work.sowRef || 'SOW';
+  const subject  = `Statement of Work — ${work.workType} (${ref})`;
+  const greeting = client.contactFirstName ? `Hi ${client.contactFirstName},` : 'Hello,';
+  const body = [
+    greeting,
+    '',
+    `Please find attached the Statement of Work for the upcoming engagement: ${work.workType}.`,
+    '',
+    `Reference: ${ref}`,
+    `Date: ${formatDate(work.date)}`,
+    `Duration: ${work.duration}`,
+    '',
+    'Could you reply to confirm acceptance? Once received, I’ll schedule the work and send the invoice via FreeAgent on completion.',
+    '',
+    'Any questions, just let me know.',
+    '',
+    'Best,',
+    sender ? `${supplier} · ${sender}` : supplier,
+  ].join('\n');
+
+  const mailto = `mailto:${encodeURIComponent(client.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.location.href = mailto;
+  toast('Opening email — remember to attach the SoW PDF', 'info');
+};
 
 // ─── INIT ─────────────────────────────────────
 renderDashboard();
