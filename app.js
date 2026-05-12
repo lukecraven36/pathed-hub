@@ -618,17 +618,46 @@ document.getElementById('btn-save-settings').addEventListener('click', () => {
   toast('Settings saved', 'success');
 });
 
+// ─── FREEAGENT OAUTH ──────────────────────────
+// FreeAgent uses standard OAuth 2.0 with a client secret. The secret lives
+// server-side in our Netlify Function; this client only knows the public ID.
+
+const FA_REDIRECT_URI = window.location.origin + window.location.pathname;
+
+function faApiBase() {
+  return state.settings.faEnv === 'sandbox'
+    ? 'https://api.sandbox.freeagent.com/v2'
+    : 'https://api.freeagent.com/v2';
+}
+
+function faAuthBase() {
+  return state.settings.faEnv === 'sandbox'
+    ? 'https://api.sandbox.freeagent.com'
+    : 'https://api.freeagent.com';
+}
+
 document.getElementById('btn-connect-fa').addEventListener('click', () => {
   const id  = document.getElementById('fa-client-id').value.trim();
   const env = document.getElementById('fa-sandbox').value;
-  if (!id) { toast('Enter your FreeAgent Client ID first', 'error'); return; }
+  if (!id) { toast('Enter your FreeAgent OAuth Identifier first', 'error'); return; }
+
+  // Persist so the callback can find them after redirect
+  state.settings.faClientId = id;
+  state.settings.faEnv      = env;
+  save('settings');
+
   const base = env === 'sandbox'
-    ? 'https://sandbox.freeagent.com'
-    : 'https://app.freeagent.com';
-  const redirect = encodeURIComponent(window.location.origin + window.location.pathname);
-  const url = `${base}/oauth2/authorize?response_type=code&client_id=${id}&redirect_uri=${redirect}`;
+    ? 'https://api.sandbox.freeagent.com'
+    : 'https://api.freeagent.com';
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id:     id,
+    redirect_uri:  FA_REDIRECT_URI,
+    state:         'fa_oauth',
+  });
+  const url = `${base}/v2/approve_app?${params}`;
   toast('Redirecting to FreeAgent to authorise…', 'info');
-  setTimeout(() => window.open(url, '_blank'), 800);
+  setTimeout(() => { window.location.href = url; }, 600);
 });
 
 // ─── MICROSOFT 365 OAUTH (PKCE) ───────────────
@@ -709,6 +738,8 @@ async function handleOAuthCallback() {
 
   if (stateP === 'ms_oauth') {
     await exchangeMsAuthCode(code);
+  } else if (stateP === 'fa_oauth') {
+    await exchangeFaAuthCode(code);
   }
 
   // Clean the URL so a refresh doesn't re-trigger the exchange
@@ -757,11 +788,83 @@ async function exchangeMsAuthCode(code) {
   }
 }
 
-// Refresh the access token if it's near expiry
+// ─── FREEAGENT TOKEN EXCHANGE (via Netlify Function) ──────────
+async function exchangeFaAuthCode(code) {
+  const s = state.settings;
+  if (!s.faClientId) {
+    toast('FreeAgent client not configured', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/.netlify/functions/freeagent-token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type:   'authorization_code',
+        code:         code,
+        client_id:    s.faClientId,
+        redirect_uri: FA_REDIRECT_URI,
+        env:          s.faEnv,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.error('[FA Token] Error:', data);
+      toast('FreeAgent token exchange failed: ' + (data.error_description || data.error || 'check Netlify function'), 'error');
+      return;
+    }
+    state.settings.faAccessToken  = data.access_token;
+    state.settings.faRefreshToken = data.refresh_token;
+    state.settings.faTokenExpiry  = Date.now() + (data.expires_in * 1000);
+    save('settings');
+    updateBadges();
+    toast('FreeAgent connected successfully', 'success');
+  } catch (err) {
+    console.error('[FA Token] Network error:', err);
+    toast('Network error connecting FreeAgent', 'error');
+  }
+}
+
+async function getFaAccessToken() {
+  const s = state.settings;
+  if (!s.faAccessToken) return null;
+  if (s.faTokenExpiry && s.faTokenExpiry - Date.now() > 120000) {
+    return s.faAccessToken;
+  }
+  if (!s.faRefreshToken) return null;
+
+  try {
+    const res = await fetch('/.netlify/functions/freeagent-token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type:    'refresh_token',
+        refresh_token: s.faRefreshToken,
+        client_id:     s.faClientId,
+        env:           s.faEnv,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.warn('[FA Refresh] Failed:', data);
+      return null;
+    }
+    state.settings.faAccessToken  = data.access_token;
+    state.settings.faRefreshToken = data.refresh_token || s.faRefreshToken;
+    state.settings.faTokenExpiry  = Date.now() + (data.expires_in * 1000);
+    save('settings');
+    return data.access_token;
+  } catch (err) {
+    console.error('[FA Refresh] Network error:', err);
+    return null;
+  }
+}
+
+// Refresh the MS access token if it's near expiry
 async function getMsAccessToken() {
   const s = state.settings;
   if (!s.msAccessToken) return null;
-  // If token has at least 2 minutes left, use it
   if (s.msTokenExpiry && s.msTokenExpiry - Date.now() > 120000) {
     return s.msAccessToken;
   }
@@ -800,40 +903,140 @@ function updateBadges() {
   const s = state.settings;
   const faBadge = document.getElementById('fa-badge');
   const msBadge = document.getElementById('ms-badge');
-  faBadge.classList.toggle('connected', !!(s.faClientId && s.faClientSecret));
+  // FA is truly connected only when we have an access token
+  faBadge.classList.toggle('connected', !!s.faAccessToken);
   // MS is truly connected only when we have an access token
   msBadge.classList.toggle('connected', !!s.msAccessToken);
 }
 
-// ─── FREEAGENT SYNC (STUB → REAL) ─────────────
+// ─── FREEAGENT SYNC (REAL) ────────────────────
 async function syncFreeAgentContact(client) {
-  const s = state.settings;
-  if (!s.faClientId) {
-    console.info('[FreeAgent] Not configured — skipping contact sync');
+  const token = await getFaAccessToken();
+  if (!token) {
+    console.info('[FreeAgent] Not connected — skipping contact sync');
     return;
   }
-  // When OAuth token is stored (post-authorisation flow), POST to FreeAgent contacts API:
-  // POST https://api.freeagent.com/v2/contacts
-  // Body: { contact: { organisation_name, first_name, last_name, email, phone_number, uses_contact_invoice_sequence: true } }
-  console.info('[FreeAgent] Would sync contact:', client.companyName);
-  // Full implementation requires token exchange — see SETUP.md
+
+  // Use the split first/last name fields directly
+  const firstName = client.contactFirstName || '';
+  const lastName  = client.contactLastName || '';
+
+  const body = {
+    contact: {
+      organisation_name: client.companyName,
+      first_name:        firstName,
+      last_name:         lastName,
+      email:             client.email || '',
+      phone_number:      client.phone || '',
+      uses_contact_invoice_sequence: true,
+    },
+  };
+
+  try {
+    const res = await fetch(`${faApiBase()}/contacts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type':  'application/json',
+        'Accept':        'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('[FA Contact] Failed:', err);
+      toast('Could not create FreeAgent contact', 'error');
+      return;
+    }
+    const data = await res.json();
+    const faUrl = data.contact && data.contact.url;
+    if (faUrl) {
+      // Store the FA URL on the local client so we can link work/invoices to it
+      const idx = state.clients.findIndex(c => c.id === client.id);
+      if (idx >= 0) {
+        state.clients[idx].faContactUrl = faUrl;
+        save('clients');
+      }
+    }
+    console.info('[FA] Contact created:', faUrl);
+    toast('Added to FreeAgent contacts', 'success');
+  } catch (err) {
+    console.error('[FA Contact] Network error:', err);
+    toast('Network error creating FreeAgent contact', 'error');
+  }
 }
 
 async function syncFreeAgentTimeEntry(work) {
-  const s = state.settings;
-  if (!s.faClientId) return;
-  console.info('[FreeAgent] Would log time/project entry for:', work.workType);
+  const token = await getFaAccessToken();
+  if (!token) return;
+
+  const client = state.clients.find(c => c.id === work.clientId);
+  if (!client || !client.faContactUrl) {
+    console.info('[FA Timeslip] Client has no FreeAgent contact yet — skipping');
+    return;
+  }
+
+  // FreeAgent timeslips require a project. We don't model projects in
+  // Pathed Hub, so we skip auto-creating timeslips and instead let the
+  // invoice carry the work. A future enhancement could create a default
+  // project per client.
+  console.info('[FA Timeslip] Skipping (no project model in Pathed Hub yet)');
 }
 
 async function syncFreeAgentInvoice(inv, client) {
-  const s = state.settings;
-  if (!s.faClientId) {
-    console.info('[FreeAgent] Not configured — invoice not pushed');
+  const token = await getFaAccessToken();
+  if (!token) {
+    console.info('[FreeAgent] Not connected — invoice not pushed');
     return;
   }
-  // POST https://api.freeagent.com/v2/invoices
-  // Body: { invoice: { contact, dated_on, payment_terms_in_days, invoice_items: [{ description, quantity, price, item_type: 'Days' }] } }
-  console.info('[FreeAgent] Would create invoice for:', inv.ref, inv.clientName);
+  if (!client.faContactUrl) {
+    toast('Client not yet synced to FreeAgent — cannot create invoice', 'error');
+    return;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const quantity = inv.duration === 'Half Day' ? 0.5 : 1;
+
+  const body = {
+    invoice: {
+      contact:                 client.faContactUrl,
+      dated_on:                today,
+      payment_terms_in_days:   30,
+      currency:                'GBP',
+      invoice_items: [
+        {
+          description: `${inv.workType} (${inv.duration})`,
+          quantity:    quantity,
+          price:       parseFloat(inv.amount) / quantity,
+          item_type:   'Days',
+        },
+      ],
+    },
+  };
+
+  try {
+    const res = await fetch(`${faApiBase()}/invoices`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type':  'application/json',
+        'Accept':        'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('[FA Invoice] Failed:', err);
+      toast('Could not create FreeAgent invoice', 'error');
+      return;
+    }
+    const data = await res.json();
+    console.info('[FA] Invoice created:', data.invoice && data.invoice.url);
+    toast('Draft invoice created in FreeAgent', 'success');
+  } catch (err) {
+    console.error('[FA Invoice] Network error:', err);
+    toast('Network error creating FreeAgent invoice', 'error');
+  }
 }
 
 // ─── OUTLOOK SYNC (REAL) ──────────────────────
